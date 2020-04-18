@@ -1,5 +1,7 @@
 const https = require('https');
 const http = require('http');
+const fs = require('fs');
+var child_process = require('child_process');
 
 const method = "GET";
 
@@ -22,40 +24,70 @@ function assignToOptions(method, url, headers) {
     return options;
 }
 
-function handleResponse(res) {
-    console.log(`状态码: ${res.statusCode}`);
-    console.log(`=================================`);
-    console.log(`响应头: ${JSON.stringify(res.headers, null, 2)}`);
-    console.log(`=================================`);
+function handleResponse(sendResponse, res) {
+    var response = { headers: {}, body: {} };
+    response.headers.status = res.statusCode;
+    Object.assign(response.headers, res.headers);
     res.setEncoding('utf8');
     var responseBody = "";
     res.on('data', (chunk) => {
         responseBody += chunk;
     });
     res.on('end', () => {
-        console.log(`响应主体: ${JSON.stringify(JSON.parse(responseBody), null, 2)}`);
-        console.log(`=================================`);
+        response.body = responseBody;
+        if ((/json$/i).test(res.headers["content-type"])) {
+            response.body = JSON.parse(responseBody);
+        }
+        sendResponse(JSON.stringify(response));
     });
+
 }
 
-function ajax(method, url, headers, body) {
+function ajax(method, url, headers, body, sendResponse) {
     var options = assignToOptions(method, url, headers);
     var req = null;
     if (options.protocol == "https:") {
-        req = https.request(options, handleResponse);
+        req = https.request(options, handleResponse.bind(this, sendResponse));
     } else {
-        req = http.request(options, handleResponse);
+        req = http.request(options, handleResponse.bind(this, sendResponse));
     }
 
     req.on('error', (e) => {
         console.error(`请求遇到问题: ${e.message}`);
     });
 
-    if (body) req.write();
+    if (body) req.write(body);
     req.end();
 }
 
-ajax(method, url, headers, body);
+
+var server = http.createServer(function (req, res) {
+    switch (req.url) {
+        case "/index.html":
+            var homepage = fs.readFileSync(__dirname + '/index.html').toString();
+            res.end(homepage);
+            break;
+        case "/api":
+            var reqBuffer = "";
+            req.on("data", (chunk) => {
+                reqBuffer += chunk;
+            })
+            req.on("end", () => {
+                var reqData = JSON.parse(reqBuffer);
+                ajax(reqData.method, reqData.url, JSON.parse(reqData.headers), reqData.body,
+                    (data) => {
+                        res.end(data);
+                    });
+            })
+            break;
+    }
+});
+
+server.listen(9394, () => {
+    console.log('服务启动(。・∀・)ノ http://127.0.0.1:9394');
+
+    child_process.exec('start chrome http://127.0.0.1:9394/index.html');
+});
 
 // 版本一： 完成基本请求，不涉及文件（支持https、http）
 // 版本二： 添加网页输入功能，显示功能
